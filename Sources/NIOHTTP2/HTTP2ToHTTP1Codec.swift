@@ -693,6 +693,32 @@ extension HPACKHeaders {
 
 extension HTTPHeaders {
     fileprivate init(requestHead: HTTPRequestHead, protocolString: String) throws {
+        if requestHead.method == .CONNECT {
+            // RFC 9113 Section 8.5: CONNECT requests use only :method and :authority.
+            var newHeaders: [(String, String)] = []
+            newHeaders.reserveCapacity(requestHead.headers.count + 2)
+            newHeaders.append((":method", requestHead.method.rawValue))
+
+            var authorityHeader: String? = nil
+            for header in requestHead.headers {
+                if header.name.lowercased() == "host" {
+                    if authorityHeader != nil {
+                        throw NIOHTTP2Errors.duplicateHostHeader()
+                    }
+                    authorityHeader = header.value
+                } else {
+                    newHeaders.append((header.name, header.value))
+                }
+            }
+
+            guard let actualAuthorityHeader = authorityHeader else {
+                throw NIOHTTP2Errors.missingHostHeader()
+            }
+            newHeaders.insert((":authority", actualAuthorityHeader), at: 1)
+            self.init(newHeaders)
+            return
+        }
+
         // To avoid too much allocation we create an array first, and then initialize the HTTPHeaders from it.
         // We want to ensure this array is large enough so we only have to allocate once. We will need an
         // array that is the same as the number of headers in requestHead.headers + 3: we're adding :path,
